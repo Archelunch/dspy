@@ -299,6 +299,7 @@ def test_tool_default_args():
 
 def test_tools_re_register_after_process_restart():
     """Tools should remain callable after Deno subprocess restart."""
+
     def echo(message: str = "") -> str:
         return f"Echo: {message}"
 
@@ -322,22 +323,14 @@ def test_mounts_replay_after_process_restart(tmp_path):
     virtual_path = f"/sandbox/{host_file.name}"
 
     with PythonInterpreter(enable_read_paths=[str(host_file)]) as interpreter:
-        first = interpreter.execute(
-            f"with open({virtual_path!r}, 'r') as f:\n"
-            f"    data = f.read()\n"
-            f"data"
-        )
+        first = interpreter.execute(f"with open({virtual_path!r}, 'r') as f:\n    data = f.read()\ndata")
         assert first == "restarted-ok"
 
         first_pid = interpreter.deno_process.pid
         interpreter.deno_process.kill()
         interpreter.deno_process.wait()
 
-        second = interpreter.execute(
-            f"with open({virtual_path!r}, 'r') as f:\n"
-            f"    data = f.read()\n"
-            f"data"
-        )
+        second = interpreter.execute(f"with open({virtual_path!r}, 'r') as f:\n    data = f.read()\ndata")
         assert second == "restarted-ok"
         assert interpreter.deno_process.pid != first_pid
 
@@ -374,7 +367,6 @@ def test_tool_error_surfaces_as_runtime_error():
         )
         assert "ValueError" in result
         assert "bad value: 42" in result
-
 
 
 # =============================================================================
@@ -633,3 +625,24 @@ def test_enable_read_paths_multiple_files(tmp_path):
         assert contents["test1.txt"] == "Content 1"
         assert contents["test2.txt"] == "Content 2"
         assert contents["test3.txt"] == "Content 3"
+
+
+def test_enable_read_paths_directory(tmp_path):
+    """Test that enable_read_paths accepts a directory without crashing.
+
+    Regression test for Bug 3: directories passed to enable_read_paths caused
+    the sandbox to fail during startup because mount_file calls
+    Deno.readFile on the directory path, which raises
+    'Is a directory (os error 21)'.
+    """
+    allowed_dir = tmp_path / "allowed_dir"
+    allowed_dir.mkdir()
+    host_file = tmp_path / "mounted_file.txt"
+    host_file.write_text("file content")
+
+    with PythonInterpreter(enable_read_paths=[str(allowed_dir), str(host_file)]) as interpreter:
+        code = "with open('/sandbox/mounted_file.txt', 'r') as f:\n    data = f.read()\ndata"
+        result = interpreter.execute(code)
+        assert result == "file content", (
+            "Sandbox should start when a directory is in enable_read_paths and files still mount"
+        )
